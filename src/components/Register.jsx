@@ -1,74 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as faceapi from '@vladmandic/face-api';
-import { Camera, Check, ShieldCheck, X, ArrowLeft, Loader } from 'lucide-react';
+import { Camera, ShieldCheck, X, ArrowLeft, Loader } from 'lucide-react';
 
-// ─── Orientation detection using 68-point landmarks ───────────────────────────
-// nose tip: 30, left-eye-outer: 36, right-eye-outer: 45
-// offset > +0.15  → user turned RIGHT  (in webcam pixel space)
-// offset < -0.15  → user turned LEFT
-// else            → CENTER
-const detectOrientation = (landmarks) => {
-  const pts = landmarks.positions;
-  const noseTip      = pts[30];
-  const leftEyeOut   = pts[36];
-  const rightEyeOut  = pts[45];
-  const eyeCenterX   = (leftEyeOut.x + rightEyeOut.x) / 2;
-  const faceWidth    = Math.abs(rightEyeOut.x - leftEyeOut.x);
-  if (faceWidth === 0) return 'center';
-  const offset = (noseTip.x - eyeCenterX) / faceWidth;
-  if (offset >  0.15) return 'right';
-  if (offset < -0.15) return 'left';
-  return 'center';
-};
-
-// Phases in order
-const PHASES = ['center', 'left', 'right'];
-
-const PHASE_CONFIG = {
-  center: {
-    instruction: '😐  Look straight at the camera',
-    color: '#06b6d4',
-    label: 'Center ✓',
-    arrow: null,
-  },
-  left: {
-    instruction: '⬅️  Now slowly turn your head LEFT',
-    color: '#f59e0b',
-    label: 'Left ✓',
-    arrow: '←',
-  },
-  right: {
-    instruction: '➡️  Now slowly turn your head RIGHT',
-    color: '#a855f7',
-    label: 'Right ✓',
-    arrow: '→',
-  },
-};
+const CENTER_COLOR = '#06b6d4';
 
 const Register = ({ onBackToLogin }) => {
   const [formData, setFormData] = useState({ firstName: '', lastName: '', email: '', password: '' });
-  const [modelsLoaded, setModelsLoaded]   = useState(false);
-  const [cameraActive, setCameraActive]   = useState(false);
-  const [scanStep, setScanStep]           = useState('none'); // 'none'|'scanning'|'complete'
-  const [scanFeedback, setScanFeedback]   = useState('');
-  const [error, setError]                 = useState('');
-  const [success, setSuccess]             = useState('');
-  const [loading, setLoading]             = useState(false);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [scanStep, setScanStep]         = useState('none'); // 'none'|'scanning'|'complete'
+  const [scanFeedback, setScanFeedback] = useState('');
+  const [error, setError]               = useState('');
+  const [success, setSuccess]           = useState('');
+  const [loading, setLoading]           = useState(false);
 
-  // Multi-phase tracking
-  const [phaseIndex, setPhaseIndex]       = useState(0);   // 0=center 1=left 2=right
-  const [phaseDone, setPhaseDone]         = useState([]);   // completed phase names
-  const descriptorsRef                    = useRef([]);     // collected descriptors per phase
-  const phaseIndexRef                     = useRef(0);
-  const phaseDoneRef                      = useRef([]);
-
-  // Keep refs in sync so the interval closure sees current values
-  const syncPhase = (idx, done) => {
-    phaseIndexRef.current = idx;
-    phaseDoneRef.current  = done;
-    setPhaseIndex(idx);
-    setPhaseDone(done);
-  };
+  const descriptorRef = useRef(null); // single captured descriptor
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -132,15 +78,14 @@ const Register = ({ onBackToLogin }) => {
     setCameraActive(false);
   };
 
-  // ─── Start scan: reset all phases ──────────────────────────────────────────
+  // ─── Start scan ──────────────────────────────────────────────────────────────
   const startFaceScan = () => {
     if (!formData.firstName || !formData.lastName || !formData.email || !formData.password) {
       setError('Please fill in all fields first.');
       return;
     }
     setError('');
-    descriptorsRef.current = [];
-    syncPhase(0, []);
+    descriptorRef.current = null;
     setScanStep('scanning');
     startVideo();
   };
@@ -148,8 +93,7 @@ const Register = ({ onBackToLogin }) => {
   const cancelScan = () => {
     stopVideo();
     setScanStep('none');
-    descriptorsRef.current = [];
-    syncPhase(0, []);
+    descriptorRef.current = null;
     setScanFeedback('');
     setError('');
   };
@@ -184,11 +128,6 @@ const Register = ({ onBackToLogin }) => {
         .withFaceLandmarks()
         .withFaceDescriptor();
 
-      const currentPhaseIdx = phaseIndexRef.current;
-      const currentDone     = phaseDoneRef.current;
-      const currentPhase    = PHASES[currentPhaseIdx];
-      const cfg             = PHASE_CONFIG[currentPhase];
-
       if (!detection) {
         setScanFeedback('No face detected — position your face in the frame…');
         if (canvasRef.current) {
@@ -205,56 +144,25 @@ const Register = ({ onBackToLogin }) => {
         const resized = faceapi.resizeResults(detection, displaySize);
         const ctx = canvasRef.current.getContext('2d');
         ctx.clearRect(0, 0, displaySize.width, displaySize.height);
-        drawBrackets(ctx, resized.detection.box, cfg.color);
+        drawBrackets(ctx, resized.detection.box, CENTER_COLOR);
       }
 
-      // Detect orientation
-      const orientation = detectOrientation(detection.landmarks);
-
-      if (orientation === currentPhase) {
-        // ✅ Correct orientation — capture descriptor
-        const desc     = Array.from(detection.descriptor);
-        descriptorsRef.current = [...descriptorsRef.current, desc];
-        const newDone  = [...currentDone, currentPhase];
-        const nextIdx  = currentPhaseIdx + 1;
-
-        if (nextIdx >= PHASES.length) {
-          // All 3 phases complete
-          clearInterval(loopRef.current);
-          loopRef.current = null;
-          syncPhase(nextIdx, newDone);
-          setScanFeedback('✅ All angles captured! Registering…');
-          setScanStep('complete');
-          stopVideo();
-          submitRegistration(descriptorsRef.current);
-        } else {
-          syncPhase(nextIdx, newDone);
-          setScanFeedback(`✓ ${currentPhase.toUpperCase()} captured! Now: ${PHASE_CONFIG[PHASES[nextIdx]].instruction}`);
-        }
-      } else {
-        // Guide user
-        setScanFeedback(cfg.instruction);
-      }
+      // ✅ Face detected — capture descriptor and register
+      setScanFeedback('✅ Face captured! Registering…');
+      clearInterval(loopRef.current);
+      loopRef.current = null;
+      descriptorRef.current = Array.from(detection.descriptor);
+      setScanStep('complete');
+      stopVideo();
+      submitRegistration(descriptorRef.current);
     }, 500);
   };
 
-  // ─── Average multiple descriptors for robustness ────────────────────────────
-  const averageDescriptors = (descs) => {
-    if (descs.length === 0) return null;
-    const len = descs[0].length;
-    const avg = new Array(len).fill(0);
-    for (const d of descs) {
-      for (let i = 0; i < len; i++) avg[i] += d[i];
-    }
-    return avg.map(v => v / descs.length);
-  };
-
-  // ─── Submit registration using averaged descriptor ──────────────────────────
-  const submitRegistration = async (collectedDescs) => {
+  // ─── Submit registration with single descriptor ─────────────────────────────
+  const submitRegistration = async (desc) => {
     setLoading(true);
     setError('');
-    const avgDesc = averageDescriptors(collectedDescs);
-    if (!avgDesc) {
+    if (!desc) {
       setError('Could not capture face data. Please try again.');
       setScanStep('scanning');
       startVideo();
@@ -270,7 +178,7 @@ const Register = ({ onBackToLogin }) => {
           lastName:   formData.lastName,
           email:      formData.email,
           password:   formData.password,
-          descriptor: avgDesc,
+          descriptor: desc,
         })
       });
       const data = await response.json();
@@ -280,16 +188,13 @@ const Register = ({ onBackToLogin }) => {
     } catch (err) {
       setError(err.message || 'Server error during registration.');
       setScanStep('none');
-      descriptorsRef.current = [];
-      syncPhase(0, []);
+      descriptorRef.current = null;
     } finally {
       setLoading(false);
     }
   };
 
   // ─── Render ─────────────────────────────────────────────────────────────────
-  const currentPhaseLabel = PHASES[phaseIndex] ? PHASE_CONFIG[PHASES[phaseIndex]] : null;
-
   return (
     <div className="glass-container">
       {/* Header */}
@@ -299,7 +204,7 @@ const Register = ({ onBackToLogin }) => {
         </button>
         <h2 className="glass-title" style={{ margin: 0, fontSize: '1.75rem' }}>Create Account</h2>
       </div>
-      <p className="glass-subtitle">Fill your details &amp; scan your face in 3 angles to register</p>
+      <p className="glass-subtitle">Fill your details &amp; look straight at the camera to register</p>
 
       {error   && <div className="status-toast error">{error}</div>}
       {success && <div className="status-toast success">{success}</div>}
@@ -329,11 +234,12 @@ const Register = ({ onBackToLogin }) => {
               {!modelsLoaded ? (
                 <><Loader size={18} style={{ animation: 'spin 0.8s linear infinite' }} /> Loading Face Engine…</>
               ) : (
-                <><Camera size={20} /> Scan Face (3 Angles)</>
+                <><Camera size={20} /> Scan Face
+                </>
               )}
             </button>
             <div style={{ textAlign: 'center', marginTop: '0.75rem' }}>
-              <span className="face-icon-badge" style={{ margin: 0 }}>Center · Left · Right</span>
+              <span className="face-icon-badge" style={{ margin: 0 }}>😐 Look straight at the camera</span>
             </div>
           </div>
         </div>
@@ -342,26 +248,19 @@ const Register = ({ onBackToLogin }) => {
       {/* ── Scanner ── */}
       {(scanStep === 'scanning' || scanStep === 'complete') && (
         <div>
-          {/* Phase progress indicators */}
+          {/* Center indicator */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-            {PHASES.map((phase) => {
-              const done   = phaseDone.includes(phase);
-              const active = PHASES[phaseIndex] === phase && scanStep === 'scanning';
-              const cfg    = PHASE_CONFIG[phase];
-              return (
-                <div key={phase} style={{
-                  display: 'flex', alignItems: 'center', gap: '0.35rem',
-                  padding: '0.3rem 0.75rem', borderRadius: '20px',
-                  fontSize: '0.8rem', fontWeight: 600, letterSpacing: '0.03em',
-                  border: `2px solid ${done ? cfg.color : active ? cfg.color : '#cbd5e1'}`,
-                  background: done ? cfg.color : active ? `${cfg.color}22` : '#f8fafc',
-                  color: done ? '#fff' : active ? cfg.color : '#94a3b8',
-                  transition: 'all 0.3s ease',
-                }}>
-                  {done ? '✓' : cfg.arrow || '●'} {phase.charAt(0).toUpperCase() + phase.slice(1)}
-                </div>
-              );
-            })}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '0.35rem',
+              padding: '0.3rem 0.75rem', borderRadius: '20px',
+              fontSize: '0.8rem', fontWeight: 600, letterSpacing: '0.03em',
+              border: `2px solid ${scanStep === 'complete' ? CENTER_COLOR : CENTER_COLOR}`,
+              background: scanStep === 'complete' ? CENTER_COLOR : `${CENTER_COLOR}22`,
+              color: scanStep === 'complete' ? '#fff' : CENTER_COLOR,
+              transition: 'all 0.3s ease',
+            }}>
+              {scanStep === 'complete' ? '✓' : '●'} Center
+            </div>
           </div>
 
           <div className="scanner-card">
@@ -370,28 +269,28 @@ const Register = ({ onBackToLogin }) => {
                 <video ref={videoRef} autoPlay muted onPlay={handlePlay} className="scanner-video" />
                 <canvas ref={canvasRef} className="scanner-canvas" />
                 <div className="scanner-overlay" />
-                <div className={`scanner-laser ${phaseDone.length > 0 ? 'success' : ''}`} />
+                <div className={`scanner-laser ${scanStep === 'complete' ? 'success' : ''}`} />
               </>
             )}
 
             {scanStep === 'complete' && !cameraActive && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', color: 'var(--success)' }}>
                 <ShieldCheck size={56} />
-                <span style={{ fontWeight: 700, fontSize: '1rem' }}>All Angles Captured!</span>
+                <span style={{ fontWeight: 700, fontSize: '1rem' }}>Face Captured!</span>
               </div>
             )}
 
             <div className="scanner-guide-text">{scanFeedback}</div>
           </div>
 
-          {/* Current phase instruction banner */}
-          {scanStep === 'scanning' && currentPhaseLabel && (
+          {/* Instruction banner */}
+          {scanStep === 'scanning' && (
             <div style={{
               marginTop: '0.75rem', padding: '0.6rem 1rem', borderRadius: '12px', textAlign: 'center',
-              background: `${currentPhaseLabel.color}18`, border: `1px solid ${currentPhaseLabel.color}44`,
-              color: currentPhaseLabel.color, fontWeight: 600, fontSize: '0.9rem'
+              background: `${CENTER_COLOR}18`, border: `1px solid ${CENTER_COLOR}44`,
+              color: CENTER_COLOR, fontWeight: 600, fontSize: '0.9rem'
             }}>
-              {currentPhaseLabel.instruction}
+              😐 Look straight at the camera
             </div>
           )}
 
