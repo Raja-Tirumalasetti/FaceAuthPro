@@ -252,3 +252,17 @@ async def get_users():
 @app.get("/api/logs")
 async def get_logs():
     return load_logs()
+
+# Explicit MIME type configuration for Windows registry compatibility
+import mimetypes
+mimetypes.init()
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("application/javascript", ".mjs")
+mimetypes.add_type("text/css", ".css")
+
+# Mount static files to serve the production frontend directly from FastAPI
+from fastapi.staticfiles import StaticFiles
+DIST_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
+if os.path.exists(DIST_DIR):
+    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="static")
+
