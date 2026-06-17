@@ -6,6 +6,7 @@ const CENTER_COLOR = '#06b6d4';
 
 const Register = ({ onBackToLogin }) => {
   const [formData, setFormData] = useState({ firstName: '', lastName: '', email: '', password: '' });
+  const formDataRef = useRef({ firstName: '', lastName: '', email: '', password: '' }); // always up-to-date for interval closures
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [scanStep, setScanStep]         = useState('none'); // 'none'|'scanning'|'complete'
@@ -39,7 +40,11 @@ const Register = ({ onBackToLogin }) => {
     return () => { active = false; stopVideo(); };
   }, []);
 
-  const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleInputChange = (e) => {
+    const updated = { ...formData, [e.target.name]: e.target.value };
+    setFormData(updated);
+    formDataRef.current = updated; // keep ref in sync
+  };
 
   const startVideo = async () => {
     setError('');
@@ -159,9 +164,22 @@ const Register = ({ onBackToLogin }) => {
   };
 
   // ─── Submit registration with single descriptor ─────────────────────────────
+  const extractError = (data) => {
+    if (!data) return 'Unknown error';
+    if (typeof data.detail === 'string') return data.detail;
+    if (Array.isArray(data.detail)) {
+      // FastAPI Pydantic validation error — array of {msg, loc, type}
+      return data.detail.map(e => e.msg || JSON.stringify(e)).join(', ');
+    }
+    if (typeof data.detail === 'object') return JSON.stringify(data.detail);
+    if (data.message) return data.message;
+    return 'Registration failed. Please try again.';
+  };
+
   const submitRegistration = async (desc) => {
     setLoading(true);
     setError('');
+    const fd = formDataRef.current; // always use ref to avoid stale closure
     if (!desc) {
       setError('Could not capture face data. Please try again.');
       setScanStep('scanning');
@@ -174,15 +192,15 @@ const Register = ({ onBackToLogin }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          firstName:  formData.firstName,
-          lastName:   formData.lastName,
-          email:      formData.email,
-          password:   formData.password,
+          firstName:  fd.firstName,
+          lastName:   fd.lastName,
+          email:      fd.email,
+          password:   fd.password,
           descriptor: desc,
         })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Registration failed.');
+      if (!response.ok) throw new Error(extractError(data));
       setSuccess('Registration successful! Redirecting to login…');
       setTimeout(() => onBackToLogin(), 2500);
     } catch (err) {
