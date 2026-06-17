@@ -1,5 +1,40 @@
 [
     {
+        "email": "rajatirumalasetti2@gmail.com",
+        "name": "Raja Tirumalasetti",
+        "action": "Face Login Success",
+        "timestamp": "2026-06-17 13:50:20",
+        "status": "success"
+    },
+    {
+        "email": "rajatirumalasetti2@gmail.com",
+        "name": "Raja Tirumalasetti",
+        "action": "Face Login Success",
+        "timestamp": "2026-06-17 13:50:20",
+        "status": "success"
+    },
+    {
+        "email": "johnasish@gmail.com",
+        "name": "raja t",
+        "action": "Face Login Success",
+        "timestamp": "2026-06-17 13:50:20",
+        "status": "success"
+    },
+    {
+        "email": "rajatirumalasetti2@gmail.com",
+        "name": "Raja Tirumalasetti",
+        "action": "Registration Success",
+        "timestamp": "2026-06-17 13:50:09",
+        "status": "success"
+    },
+    {
+        "email": "rajatirumalasetti2@gmail.com",
+        "name": "Raja Tirumalasetti",
+        "action": "Registration Success (Imported)",
+        "timestamp": "2026-06-16 15:00:09",
+        "status": "success"
+    },
+    {
         "email": "abdul@gmail.com",
         "name": "abdul p",
         "action": "Registration Success (Imported)",

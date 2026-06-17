@@ -179,7 +179,7 @@ const Register = ({ onBackToLogin }) => {
   const submitRegistration = async (desc) => {
     setLoading(true);
     setError('');
-    const fd = formDataRef.current; // always use ref to avoid stale closure
+    const fd = { ...formData }; // use latest state instead of ref
     if (!desc) {
       setError('Could not capture face data. Please try again.');
       setScanStep('scanning');
@@ -188,6 +188,13 @@ const Register = ({ onBackToLogin }) => {
       return;
     }
     try {
+      console.log('Submitting registration payload:', {
+        firstName:  fd.firstName,
+        lastName:   fd.lastName,
+        email:      fd.email,
+        password:   fd.password,
+        descriptor: desc,
+      });
       const response = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
