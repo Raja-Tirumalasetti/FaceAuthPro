@@ -18,10 +18,10 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ ./backend/
 COPY --from=frontend-builder /app/dist ./dist
 
-EXPOSE 8000
+EXPOSE 10000
 
-# Set environment variable for port
-ENV PORT=8000
+# Set environment variable for port (Render injects PORT=10000)
+ENV PORT=10000
 
 # Run uvicorn server
 CMD uvicorn backend.main:app --host 0.0.0.0 --port $PORT
